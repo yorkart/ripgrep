@@ -1,6 +1,11 @@
-TBD
-===
+14.1.1 (2024-09-08)
+===================
 Unreleased changes. Release notes have not yet been written.
+
+Bug fixes:
+
+* [BUG #2884](https://github.com/BurntSushi/ripgrep/issues/2884):
+  Fix bug where ripgrep could miss some matches that it should report.
 
 Miscellaneous:
 
