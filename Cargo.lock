@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "grep-pcre2"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "grep-matcher",
  "log",
