@@ -99,6 +99,8 @@ impl SinkError for Box<dyn std::error::Error> {
 /// For simpler uses of `Sink`, callers may elect to use one of
 /// the more convenient but less flexible implementations in the
 /// [`sinks`] module.
+///
+/// 注：用于接收、处理匹配结果
 pub trait Sink {
     /// The type of an error that should be reported by a searcher.
     ///
@@ -121,6 +123,8 @@ pub trait Sink {
     /// If this returns an error, then searching is stopped immediately,
     /// `finish` is not called and the error is bubbled back up to the caller
     /// of the searcher.
+    ///
+    /// 注：处理已经匹配到的数据
     fn matched(
         &mut self,
         _searcher: &Searcher,
@@ -139,6 +143,8 @@ pub trait Sink {
     /// If this returns an error, then searching is stopped immediately,
     /// `finish` is not called and the error is bubbled back up to the caller
     /// of the searcher.
+    ///
+    /// 注：处理before/after context级联的输出
     #[inline]
     fn context(
         &mut self,

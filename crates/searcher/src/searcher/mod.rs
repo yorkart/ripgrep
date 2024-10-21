@@ -123,6 +123,8 @@ impl BinaryDetection {
 /// source data from an encoding to UTF-8 before searching.
 ///
 /// An `Encoding` will always be cheap to clone.
+///
+/// 注：字符集
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Encoding(&'static encoding_rs::Encoding);
 
@@ -136,6 +138,7 @@ impl Encoding {
     /// returns an error.
     pub fn new(label: &str) -> Result<Encoding, ConfigError> {
         let label = label.as_bytes();
+        // 注：label为字符集，比如：Encoding::for_label(b"utf-8")
         match encoding_rs::Encoding::for_label_no_replacement(label) {
             Some(encoding) => Ok(Encoding(encoding)),
             None => {
@@ -147,38 +150,67 @@ impl Encoding {
 
 /// The internal configuration of a searcher. This is shared among several
 /// search related types, but is only ever written to by the SearcherBuilder.
+///
+/// 注：searcher配置
 #[derive(Clone, Debug)]
 pub struct Config {
     /// The line terminator to use.
+    ///
+    /// 注：换行符描述
     line_term: LineTerminator,
     /// Whether to invert matching.
+    ///
+    /// 注：是否反向匹配，即排除
     invert_match: bool,
     /// The number of lines after a match to include.
+    ///
+    /// 注：匹配到行时，输出之后N行，类似grep工具可以匹配后多输出一些行
     after_context: usize,
     /// The number of lines before a match to include.
+    ///
+    /// 注：匹配到行时，输出之前的N行
     before_context: usize,
     /// Whether to enable unbounded context or not.
+    ///
+    /// 注：如果匹配到，输出所有内容
     passthru: bool,
     /// Whether to count line numbers.
+    ///
+    /// 注：是否输出行号
     line_number: bool,
     /// The maximum amount of heap memory to use.
     ///
     /// When not given, no explicit limit is enforced. When set to `0`, then
     /// only the memory map search strategy is available.
+    ///
+    /// 注：控制LineBuffer.capacity，表示最大buf大小
     heap_limit: Option<usize>,
     /// The memory map strategy.
+    ///
+    /// 注：是否开启mmap
     mmap: MmapChoice,
     /// The binary data detection strategy.
+    ///
+    /// 注：二进制检测策略
     binary: BinaryDetection,
     /// Whether to enable matching across multiple lines.
+    ///
+    /// 注：是否开启多行，开启后，特别需要命中多个关键词的场景，会跨行匹配
     multi_line: bool,
     /// An encoding that, when present, causes the searcher to transcode all
     /// input from the encoding to UTF-8.
+    ///
+    /// 注：字符集
     encoding: Option<Encoding>,
     /// Whether to do automatic transcoding based on a BOM or not.
+    ///
+    /// 注：是否自动检测字符集，即是否启用 BOM（字节顺序标记）嗅探。
+    /// BOM 嗅探可以帮助searcher自动检测输入数据的字符编码。
     bom_sniffing: bool,
     /// Whether to stop searching when a non-matching line is found after a
     /// matching line.
+    ///
+    /// 注：是否在匹配到关键词后，停止搜索，即只返回一条。
     stop_on_nonmatch: bool,
 }
 
@@ -207,11 +239,15 @@ impl Config {
     /// configuration's context.
     ///
     /// If this returns `0`, then no context is ever needed.
+    ///
+    /// 注：返回最大需要buf行大小，这里部分向前还是向后，取最大的。
     fn max_context(&self) -> usize {
         cmp::max(self.before_context, self.after_context)
     }
 
     /// Build a line buffer from this configuration.
+    ///
+    /// 注：构建LineBuffer
     fn line_buffer(&self) -> LineBuffer {
         let mut builder = LineBufferBuilder::new();
         builder
@@ -226,7 +262,7 @@ impl Config {
             };
             builder
                 .capacity(capacity)
-                .buffer_alloc(BufferAllocation::Error(additional));
+                .buffer_alloc(BufferAllocation::Error(additional)); // 注：Error是默认行为，强制有上限
         }
         builder.build()
     }
@@ -316,18 +352,19 @@ impl SearcherBuilder {
             config.after_context = 0;
         }
 
+        // 注：encoding_rs的字符集解码器构造
         let mut decode_builder = DecodeReaderBytesBuilder::new();
         decode_builder
-            .encoding(self.config.encoding.as_ref().map(|e| e.0))
-            .utf8_passthru(true)
-            .strip_bom(self.config.bom_sniffing)
-            .bom_override(true)
-            .bom_sniffing(self.config.bom_sniffing);
+            .encoding(self.config.encoding.as_ref().map(|e| e.0)) // 注：指定字符集
+            .utf8_passthru(true) // 注：开启utf8直通模式，即对utf8编码不做解码，直接返回给调用者
+            .strip_bom(self.config.bom_sniffing) // 注：true表示跳过文件开头的BOM字符
+            .bom_override(true) // 注：表述是否覆盖BOM指示的编码（即设置的字符集和BOM的字符集不一致时的选择策略）
+            .bom_sniffing(self.config.bom_sniffing); // 注：true表示优先采用BOM嗅探的字符集
 
         Searcher {
             config,
             decode_builder,
-            decode_buffer: RefCell::new(vec![0; 8 * (1 << 10)]),
+            decode_buffer: RefCell::new(vec![0; 8 * (1 << 10)]), // 注：8192
             line_buffer: RefCell::new(self.config.line_buffer()),
             multi_line_buffer: RefCell::new(vec![]),
         }
@@ -573,6 +610,8 @@ impl SearcherBuilder {
 /// be provided by the caller when executing a search.
 ///
 /// When possible, a searcher should be reused.
+///
+/// 注：Searcher负责读取数据流，对接Matcher，对匹配的结果写入到Sink中
 #[derive(Clone, Debug)]
 pub struct Searcher {
     /// The configuration for this searcher.
@@ -580,6 +619,8 @@ pub struct Searcher {
     /// We make most of these settings available to users of `Searcher` via
     /// public API methods, which can be queried in implementations of `Sink`
     /// if necessary.
+    ///
+    /// 注：searcher的配置
     config: Config,
     /// A builder for constructing a streaming reader that transcodes source
     /// data according to either an explicitly specified encoding or via an
@@ -587,8 +628,12 @@ pub struct Searcher {
     ///
     /// When no transcoding is needed, then the transcoder built will pass
     /// through the underlying bytes with no additional overhead.
+    ///
+    /// 注：decoding_rs的解码器
     decode_builder: DecodeReaderBytesBuilder,
     /// A buffer that is used for transcoding scratch space.
+    ///
+    /// 注：存储解码过程中的临时数据，默认为8K
     decode_buffer: RefCell<Vec<u8>>,
     /// A line buffer for use in line oriented searching.
     ///
@@ -596,11 +641,15 @@ pub struct Searcher {
     /// to sinks. We still require a mutable borrow to execute a search, so
     /// we statically prevent callers from causing RefCell to panic at runtime
     /// due to a borrowing violation.
+    ///
+    /// 注：行缓冲区，实现基于行的搜索（大小由最外层heap_size控制）
     line_buffer: RefCell<LineBuffer>,
     /// A buffer in which to store the contents of a reader when performing a
     /// multi line search. In particular, multi line searches cannot be
     /// performed incrementally, and need the entire haystack in memory at
     /// once.
+    ///
+    /// 注：多行匹配缓冲区
     multi_line_buffer: RefCell<Vec<u8>>,
 }
 
@@ -715,8 +764,10 @@ impl Searcher {
         R: io::Read,
         S: Sink,
     {
+        // 注：检查配置是否合法
         self.check_config(&matcher).map_err(S::Error::error_config)?;
 
+        // 注：构造解码器decoder，用于将字节流解码为字符流
         let mut decode_buffer = self.decode_buffer.borrow_mut();
         let decoder = self
             .decode_builder
@@ -740,7 +791,7 @@ impl Searcher {
             let mut line_buffer = self.line_buffer.borrow_mut();
             let rdr = LineBufferReader::new(decoder, &mut *line_buffer);
             log::trace!("generic reader: searching via roll buffer strategy");
-            ReadByLine::new(self, matcher, rdr, write_to).run()
+            ReadByLine::new(self, matcher, rdr, write_to).run() // 注：很机智，采用RefCell实现内部可变性
         }
     }
 
@@ -782,6 +833,8 @@ impl Searcher {
 
     /// Check that the searcher's configuration and the matcher are consistent
     /// with each other.
+    ///
+    /// 注：校验配置是否合法：分隔符是否一致，是否启用内存映射
     fn check_config<M: Matcher>(&self, matcher: M) -> Result<(), ConfigError> {
         if self.config.heap_limit == Some(0) && !self.config.mmap.is_enabled()
         {

@@ -13,6 +13,8 @@ use {
 /// yielded by the iterator are guaranteed to be non-empty.
 ///
 /// `'b` refers to the lifetime of the underlying bytes.
+///
+/// 注：对LineStep和bytes包装成一个iterator。
 #[derive(Debug)]
 pub struct LineIter<'b> {
     bytes: &'b [u8],
@@ -45,6 +47,9 @@ impl<'b> Iterator for LineIter<'b> {
 ///
 /// Line terminators are considered part of the line they terminate. All lines
 /// yielded by the iterator are guaranteed to be non-empty.
+///
+/// 注：构造给定一个其实结束范围，然后传入bytes进行检索，不把bytes的所有权给LineStep， 而是通过pos和end来确定范围，
+/// 然后通过next_match来获取匹配的范围。
 #[derive(Debug)]
 pub struct LineStep {
     line_term: u8,
@@ -108,12 +113,16 @@ impl LineStep {
 }
 
 /// Count the number of occurrences of `line_term` in `bytes`.
+///
+/// 注： 统计给定bytes中line_term出现的次数。
 pub(crate) fn count(bytes: &[u8], line_term: u8) -> u64 {
     memchr::memchr_iter(line_term, bytes).count() as u64
 }
 
 /// Given a line that possibly ends with a terminator, return that line without
 /// the terminator.
+///
+/// 注：返回不包含换行符的line（即去除尾部的换行符）。
 #[inline(always)]
 pub(crate) fn without_terminator(
     bytes: &[u8],
@@ -131,6 +140,9 @@ pub(crate) fn without_terminator(
 /// of bytes.
 ///
 /// Line terminators are considered part of the line they terminate.
+///
+/// 注：给定一个range，以line_term作为定界符，返回完全包含range的最小的range。
+/// range可以看做是一个子串，返回包含子串的最小父串，父串要line_term开头和结尾（如果line_term能找到）。
 #[inline(always)]
 pub(crate) fn locate(bytes: &[u8], line_term: u8, range: Match) -> Match {
     let line_start =
@@ -154,6 +166,8 @@ pub(crate) fn locate(bytes: &[u8], line_term: u8, range: Match) -> Match {
 ///
 /// If `bytes` ends with a line terminator, then the terminator itself is
 /// considered part of the last line.
+///
+/// 注：从后向前，找count个line_term，即找多少行； 返回找到的offset
 pub(crate) fn preceding(bytes: &[u8], line_term: u8, count: usize) -> usize {
     preceding_by_pos(bytes, bytes.len(), line_term, count)
 }
@@ -167,6 +181,8 @@ pub(crate) fn preceding(bytes: &[u8], line_term: u8, count: usize) -> usize {
 /// the line that it terminates. For example, given `bytes = b"abc\nxyz\n"`
 /// and `pos = 7`, `preceding(bytes, pos, b'\n', 0)` returns `4` (as does `pos
 /// = 8`) and `preceding(bytes, pos, `b'\n', 1)` returns `0`.
+///
+/// 注：向前查找line_term，返回给定pos之前的第count个line_term的起始位置。
 fn preceding_by_pos(
     bytes: &[u8],
     mut pos: usize,

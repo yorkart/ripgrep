@@ -10,6 +10,37 @@ use memchr::memchr;
 /// of a capture group reference and is expected to resolve the index to its
 /// corresponding matched text. If no such match exists, then `append` should
 /// not write anything to its given buffer.
+///
+/// 注：字符串模板替换， 模板例子："xxx $a to ${b}"，支持$和${}方式
+/// * `replacement`：是一个包含占位符的字符串模板
+/// * `append`：将匹配到索引，追加到dst（fn第二个参数，当然这是调用方的行为）
+/// * `name_to_index`：一般是模板中解析到了占位符key，需要根据key找到对应index，这个index是正则捕获组中的索引
+///
+/// 示例：
+/// ```
+/// let replacement = "Hello, $name! You are $age years old.";
+/// let name_to_index = |name: &str| match name {
+///     "name" => Some(0),
+///     "age" => Some(1),
+///     _ => None,
+/// };
+///
+/// let caps = vec!["Alice", "30"];
+/// let mut result: Vec<u8> = vec![];
+///
+/// interpolate(
+///     replacement.as_bytes(),
+///     |i, dst| {
+///         if let Some(&s) = caps.get(i) {
+///             dst.extend(s.as_bytes());
+///         }
+///     },
+///     name_to_index,
+///     &mut result,
+/// );
+///
+/// assert_eq!(result, b"Hello, Alice! You are 30 years old.");
+/// ```
 #[inline]
 pub fn interpolate<A, N>(
     mut replacement: &[u8],

@@ -54,6 +54,7 @@ impl RegexMatcherBuilder {
         &self,
         patterns: &[P],
     ) -> Result<RegexMatcher, Error> {
+        println!("pattern: {:?}", patterns.iter().map(AsRef::as_ref).collect::<Vec<_>>());
         let mut chir = self.config.build_many(patterns)?;
         // 'whole_line' is a strict subset of 'word', so when it is enabled,
         // we don't need to both with any specific to word matching.
@@ -65,6 +66,7 @@ impl RegexMatcherBuilder {
         let regex = chir.to_regex()?;
         log::trace!("final regex: {:?}", chir.hir().to_string());
 
+        // 注：确定排除的字符，构建成bitmap
         let non_matching_bytes = chir.non_matching_bytes();
         // If we can pick out some literals from the regex, then we might be
         // able to build a faster regex that quickly identifies candidate
@@ -366,16 +368,24 @@ impl RegexMatcherBuilder {
 #[derive(Clone, Debug)]
 pub struct RegexMatcher {
     /// The configuration specified by the caller.
+    ///
+    /// 注：匹配的配置（大小写敏感、多行匹配等配置）
     config: Config,
     /// The regular expression compiled from the pattern provided by the
     /// caller.
+    ///
+    /// 注：正则表达式
     regex: Regex,
     /// A regex that never reports false negatives but may report false
     /// positives that is believed to be capable of being matched more quickly
     /// than `regex`. Typically, this is a single literal or an alternation
     /// of literals.
+    ///
+    /// 注：快速匹配的正则表达式，用于加速匹配
     fast_line_regex: Option<Regex>,
     /// A set of bytes that will never appear in a match.
+    ///
+    /// 注：确定不需要匹配的字符，构建成ByteSet，类似一个bitmap，加速匹配
     non_matching_bytes: ByteSet,
 }
 
@@ -416,6 +426,7 @@ impl Matcher for RegexMatcher {
         haystack: &[u8],
         at: usize,
     ) -> Result<Option<Match>, NoError> {
+        // 注：Input用于封装将要进行正则匹配的字符串，span用于指定匹配的范围（span类似range）
         let input = Input::new(haystack).span(at..haystack.len());
         Ok(self.regex.find(input).map(|m| Match::new(m.start(), m.end())))
     }

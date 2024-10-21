@@ -17,19 +17,36 @@ enum FastMatchResult {
     SwitchToSlow,
 }
 
+/// 注：核心驱动，包装了matcher & searcher & sink，即输入、匹配、输出整个流量
+/// 调用过程：begin() -> while( fill() -> match_by_line() ) -> finish()
 #[derive(Debug)]
 pub(crate) struct Core<'s, M: 's, S> {
+    /// 注：searcher配置
     config: &'s Config,
     matcher: M,
     searcher: &'s Searcher,
     sink: S,
+    /// 注：是否为二进制
     binary: bool,
+    /// 注：记录读取的位置
+    /// 作用于每次roll内的状态，每次roll，会计算可以处理的行range，pos用于标记可处理range的右边界offset
     pos: usize,
+    /// 注：全局统计的offset
     absolute_byte_offset: u64,
+    /// 注：如果检测到二进制字符，则存储该字符的offset
     binary_byte_offset: Option<usize>,
+    /// 注：如果开启输出line_number，则会保存检索已经行进的行号
     line_number: Option<u64>,
+    /// 注：每次做line count时，存储已经count到的位置，用于作为下次count的起始offset
+    /// 作用于每次roll内的状态，下一次roll被重置
     last_line_counted: usize,
+    /// 注：记录在before after context过程中，对已经探测到的数据进行遍历时，控制前进的位置
+    /// 等同于 记录已经完成sink发送进度，即还没有sink部分的offset
+    /// 作用于每次roll内的状态，下一次roll被重置
     last_line_visited: usize,
+    /// 注：标记向后探测多少行。这个标记逻辑很刁钻：
+    /// 1. 在匹配后才复制，后面持续的遍历，如果匹配不成功，但该字段有值，则说明是需要级联输出，并递减该值
+    /// 2. 如果在after_context范围内，又成功匹配，重置该值。
     after_context_left: usize,
     has_sunk: bool,
     has_matched: bool,
@@ -120,6 +137,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         &mut self,
         buf: &[u8],
     ) -> Result<bool, S::Error> {
+        // 注：判断是否是常规的按行匹配模式，即fast模式
         if self.is_line_by_line_fast() {
             match self.match_by_line_fast(buf)? {
                 FastMatchResult::SwitchToSlow => self.match_by_line_slow(buf),
@@ -131,7 +149,11 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         }
     }
 
+    /// 注：传入的buf，即line_buffer中可读数据，计算buffer中offset向前可滚动的位置
+    /// 正常情况下，因为buf里是完整行，如果已经读取，直接滚动到结尾即可
+    /// 在有before|after context时，需要向前级联N行，所以此时滚动buf要留N行老数据
     pub(crate) fn roll(&mut self, buf: &[u8]) -> usize {
+        // 注：self.config.max_context()就是查找需要向前、向后多关联匹配的最大行数
         let consumed = if self.config.max_context() == 0 {
             buf.len()
         } else {
@@ -140,6 +162,8 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
             // separator (when before_context==0 and after_context>0), we
             // need to know something about the position of the previous
             // line visited, even if we're at the beginning of the buffer.
+            // 注：从后向前找max_context行数据，定位到起始offset
+            // 从后往前是为了保证buffer里至少留max_context行老数据，用于before_context级联
             let context_start = lines::preceding(
                 buf,
                 self.config.line_term.as_byte(),
@@ -149,6 +173,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
                 std::cmp::max(context_start, self.last_line_visited);
             consumed
         };
+        // 注：统计已标记消费部分中的行数
         self.count_lines(buf, consumed);
         self.absolute_byte_offset += consumed as u64;
         self.last_line_counted = 0;
@@ -157,19 +182,22 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         consumed
     }
 
+    /// 注：是否检测到二进制字符，true表示检测到
     pub(crate) fn detect_binary(
         &mut self,
         buf: &[u8],
         range: &Range,
     ) -> Result<bool, S::Error> {
         if self.binary_byte_offset.is_some() {
-            return Ok(self.config.binary.quit_byte().is_some());
+            return Ok(self.config.binary.quit_byte().is_some()); // 注：如果配置了停止符，返回true
         }
+        // 注：从配置获取需要检测的二进制字符
         let binary_byte = match self.config.binary.0 {
             BinaryDetection::Quit(b) => b,
             BinaryDetection::Convert(b) => b,
             _ => return Ok(false),
         };
+        // 注：计算range内，第一个二进制字符的offset
         if let Some(i) = buf[*range].find_byte(binary_byte) {
             let offset = range.start() + i;
             self.binary_byte_offset = Some(offset);
@@ -182,6 +210,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         }
     }
 
+    /// 注：向前级联N行，并且发送到sink
     pub(crate) fn before_context_by_line(
         &mut self,
         buf: &[u8],
@@ -194,6 +223,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         if range.is_empty() {
             return Ok(true);
         }
+        // 注：向前探测N行（before_context），找到起始offset
         let before_context_start = range.start()
             + lines::preceding(
                 &buf[range],
@@ -201,16 +231,20 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
                 self.config.before_context - 1,
             );
 
+        // 注：这里二次遍历需要探测的range
         let range = Range::new(before_context_start, range.end());
         let mut stepper = LineStep::new(
             self.config.line_term.as_byte(),
             range.start(),
             range.end(),
         );
+        // 注：遍历级联出来的行
         while let Some(line) = stepper.next_match(buf) {
+            // 注：检测不一致情况，如果有则发送中断给sink，sink返回false，则中断
             if !self.sink_break_context(line.start())? {
                 return Ok(false);
             }
+            // 注：向sink发送一行数据（before_context级联的行）
             if !self.sink_before_context(buf, &line)? {
                 return Ok(false);
             }
@@ -265,38 +299,47 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
     fn match_by_line_slow(&mut self, buf: &[u8]) -> Result<bool, S::Error> {
         debug_assert!(!self.searcher.multi_line_with_matcher(&self.matcher));
 
+        // 注：构造LineStep
         let range = Range::new(self.pos(), buf.len());
         let mut stepper = LineStep::new(
             self.config.line_term.as_byte(),
             range.start(),
             range.end(),
         );
+        // 注：按行遍历buf
         while let Some(line) = stepper.next_match(buf) {
             let matched = {
                 // Stripping the line terminator is necessary to prevent some
                 // classes of regexes from matching the empty position *after*
                 // the end of the line. For example, `(?m)^$` will match at
                 // position (2, 2) in the string `a\n`.
+                // 注：提取slice，不包含分隔符
                 let slice = lines::without_terminator(
                     &buf[line],
                     self.config.line_term,
                 );
+                // 注：提交给matcher进行匹配
                 match self.matcher.shortest_match(slice) {
                     Err(err) => return Err(S::Error::error_message(err)),
                     Ok(result) => result.is_some(),
                 }
             };
+            // 注：更新遍历offset进度
             self.set_pos(line.end());
+            // 注：是否匹配成功
             let success = matched != self.config.invert_match;
             if success {
                 self.has_matched = true;
+                // 注：向前级联N行，并且发送到sink
                 if !self.before_context_by_line(buf, line.start())? {
                     return Ok(false);
                 }
+                // 注：发送匹配行到sink
                 if !self.sink_matched(buf, &line)? {
                     return Ok(false);
                 }
             } else if self.after_context_left >= 1 {
+                // 注：匹配不成功情况下，如果还在上一次成功匹配的after_context范围内，继续向sink输出
                 if !self.sink_after_context(buf, &line)? {
                     return Ok(false);
                 }
@@ -312,6 +355,8 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         Ok(true)
     }
 
+    /// 注：快速匹配模式，优势是不是按行进行匹配，而是按buffer直接匹配，省去切分行的过程
+    /// 整体还是匹配->向前探测->
     fn match_by_line_fast(
         &mut self,
         buf: &[u8],
@@ -320,6 +365,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
 
         debug_assert!(!self.config.passthru);
         while !buf[self.pos()..].is_empty() {
+            // 注：重复校验，如果不符合fast模式，切换到slow模式
             if self.config.stop_on_nonmatch && self.has_matched {
                 return Ok(SwitchToSlow);
             }
@@ -394,6 +440,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         Ok(true)
     }
 
+    /// 注：该模式下，不需要先切分行，而是直接尝试匹配，匹配到了，根据位置再探测出line的位置
     #[inline(always)]
     fn find_by_line_fast(
         &self,
@@ -404,10 +451,12 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
 
         let mut pos = self.pos();
         while !buf[pos..].is_empty() {
+            // 注：相当于多行直接给matcher去匹配，返回第一个匹配项
             match self.matcher.find_candidate_line(&buf[pos..]) {
                 Err(err) => return Err(S::Error::error_message(err)),
                 Ok(None) => return Ok(None),
                 Ok(Some(LineMatchKind::Confirmed(i))) => {
+                    // 注：以i位置为基点，向前、向后探测出一个完整line
                     let line = lines::locate(
                         buf,
                         self.config.line_term.as_byte(),
@@ -432,10 +481,12 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
                     // like `(?m)^$` can match at the final position beyond a
                     // line terminator, which is non-sensical in line oriented
                     // matching.
+                    // 注：返回不包含换行符的line（即去除尾部的终止符）。
                     let slice = lines::without_terminator(
                         &buf[line],
                         self.config.line_term,
                     );
+                    // 注：再来一次精确匹配
                     match self.matcher.is_match(slice) {
                         Err(err) => return Err(S::Error::error_message(err)),
                         Ok(true) => return Ok(Some(line)),
@@ -450,21 +501,27 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         Ok(None)
     }
 
+    /// 注：向sink发送匹配行数据（当前行）
     #[inline(always)]
     fn sink_matched(
         &mut self,
         buf: &[u8],
         range: &Range,
     ) -> Result<bool, S::Error> {
+        // 注：是否是二进制文件检测
         if self.binary && self.detect_binary(buf, range)? {
             return Ok(false);
         }
+        // 注：不一致情况检测，如果有则发送中断给sink，sink返回false，则中断
         if !self.sink_break_context(range.start())? {
             return Ok(false);
         }
+        // 注：计算line number
         self.count_lines(buf, range.start());
+        // 注：计算line的绝对offset
         let offset = self.absolute_byte_offset + range.start() as u64;
         let linebuf = &buf[*range];
+        // 注：向sink发送匹配行数据
         let keepgoing = self.sink.matched(
             &self.searcher,
             &SinkMatch {
@@ -479,12 +536,14 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         if !keepgoing {
             return Ok(false);
         }
+        // 注：更新已经发送的进度
         self.last_line_visited = range.end();
         self.after_context_left = self.config.after_context;
         self.has_sunk = true;
         Ok(true)
     }
 
+    /// 注：向sink写一行数据，这里是写before部分行数据
     fn sink_before_context(
         &mut self,
         buf: &[u8],
@@ -493,7 +552,9 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         if self.binary && self.detect_binary(buf, range)? {
             return Ok(false);
         }
+        // 注：这里像重复执行，不过count_lines是幂等计算，
         self.count_lines(buf, range.start());
+        // 注：计算line的绝对offset
         let offset = self.absolute_byte_offset + range.start() as u64;
         let keepgoing = self.sink.context(
             &self.searcher,
@@ -509,11 +570,13 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         if !keepgoing {
             return Ok(false);
         }
+        // 注：更新before_context结果遍历进度
         self.last_line_visited = range.end();
         self.has_sunk = true;
         Ok(true)
     }
 
+    /// 注：向sink输出after部分行数据
     fn sink_after_context(
         &mut self,
         buf: &[u8],
@@ -575,6 +638,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         Ok(true)
     }
 
+    /// 注：检测不一致情况时，发送中断通知给sink， sink可以决定是否要中断
     fn sink_break_context(
         &mut self,
         start_of_line: usize,
@@ -590,24 +654,29 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         }
     }
 
+    /// 注：统计buf中的行数，buf range为this.last_line_counted ~ upto
     fn count_lines(&mut self, buf: &[u8], upto: usize) {
         if let Some(ref mut line_number) = self.line_number {
             if self.last_line_counted >= upto {
                 return;
             }
-            let slice = &buf[self.last_line_counted..upto];
-            let count = lines::count(slice, self.config.line_term.as_byte());
-            *line_number += count;
-            self.last_line_counted = upto;
+            let slice = &buf[self.last_line_counted..upto]; // 注：可读range的slice
+            let count = lines::count(slice, self.config.line_term.as_byte()); // 注：统计slice内line_term数量，即行数
+            *line_number += count; // 注：行号累加
+            self.last_line_counted = upto; // 注：标记已统计的offset
         }
     }
 
+    /// 注：判断是不是常规的按一个line_term字节进行行分割，如果是，返回true
+    /// 常规定义：没有特殊的直通模式模式、不是关键词匹配直接退出模式 & 正则中没有line_term
     fn is_line_by_line_fast(&self) -> bool {
         debug_assert!(!self.searcher.multi_line_with_matcher(&self.matcher));
 
+        // 注：配置了匹配直通模式，即返回所有内容
         if self.config.passthru {
             return false;
         }
+        // 注：配置了配置关键词直接退出 & 且已经匹配到关键词
         if self.config.stop_on_nonmatch && self.has_matched {
             return false;
         }
@@ -632,6 +701,7 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
             // whether the regex can match `\r` or not. Namely, a `\r` is
             // neither necessary nor sufficient to terminate a line. A `\n` is
             // always required.
+            // 注：判断正则表达式中是否包含line_term
             if non_matching.contains(self.config.line_term.as_byte()) {
                 return true;
             }

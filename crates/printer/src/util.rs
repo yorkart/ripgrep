@@ -498,6 +498,7 @@ where
     // responsible for finding matches when necessary, and the printer
     // shouldn't be involved in this business in the first place. Sigh. Live
     // and learn. Abstraction boundaries are hard.
+    // 注：是否为多行情况
     let is_multi_line = searcher.multi_line_with_matcher(&matcher);
     if is_multi_line {
         if bytes[range.end..].len() >= MAX_LOOK_AHEAD {
@@ -507,10 +508,12 @@ where
         // When searching a single line, we should remove the line terminator.
         // Otherwise, it's possible for the regex (via look-around) to observe
         // the line terminator and not match because of it.
+        // 注：单行移除结果的换行符
         let mut m = Match::new(0, range.end);
         trim_line_terminator(searcher, bytes, &mut m);
         bytes = &bytes[..m.end()];
     }
+    // 注：搜索bytes[range]中匹配的内容，将
     matcher
         .find_iter_at(bytes, range.start, |m| {
             if m.start() >= range.end {

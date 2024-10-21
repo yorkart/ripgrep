@@ -9,8 +9,10 @@ use crate::{
 
 #[derive(Debug)]
 pub(crate) struct ReadByLine<'s, M, R, S> {
+    /// 注：searcher的配置
     config: &'s Config,
     core: Core<'s, M, S>,
+    /// 注：行reader
     rdr: LineBufferReader<'s, R>,
 }
 
@@ -51,13 +53,18 @@ where
 
         let already_binary = self.rdr.binary_byte_offset().is_some();
         let old_buf_len = self.rdr.buffer().len();
+        // 注：这里很关键：在before场景，需要在line_buffer里流足N条日志，用于级联
+        // 注：core识别可消费部分（这里consumed不包含需要暂存的老数据）
         let consumed = self.core.roll(self.rdr.buffer());
+        // 注：reader标记消费进度
         self.rdr.consume(consumed);
+        // 注：reader继续填充多行（此时，line_buffer会被重新整理）
         let didread = match self.rdr.fill() {
             Err(err) => return Err(S::Error::error_io(err)),
             Ok(didread) => didread,
         };
         if !already_binary {
+            // 注：二级制字符检测
             if let Some(offset) = self.rdr.binary_byte_offset() {
                 if !self.core.binary_data(offset)? {
                     return Ok(false);

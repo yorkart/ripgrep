@@ -13,16 +13,22 @@ pub(crate) const DEFAULT_BUFFER_CAPACITY: usize = 64 * (1 << 10); // 64 KB
 /// enabled) that do not fit in the buffer.
 ///
 /// The default is to eagerly allocate without a limit.
+///
+/// 注：对应行比较长的情况，是否需要扩容
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BufferAllocation {
     /// Attempt to expand the size of the buffer until either at least the next
     /// line fits into memory or until all available memory is exhausted.
     ///
     /// This is the default.
+    ///
+    /// 注：尝试扩容，知道内存耗尽
     Eager,
     /// Limit the amount of additional memory allocated to the given size. If
     /// a line is found that requires more memory than is allowed here, then
     /// stop reading and return an error.
+    ///
+    /// 注：超出size对应内存大小，返回错误
     Error(usize),
 }
 
@@ -47,19 +53,27 @@ pub(crate) fn alloc_error(limit: usize) -> io::Error {
 /// is that binary data often indicates data that is undesirable to search
 /// using textual patterns. Of course, there are many cases in which this isn't
 /// true, which is why binary detection is disabled by default.
+///
+/// 注：是否进行二进制检测
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BinaryDetection {
     /// No binary detection is performed. Data reported by the line buffer may
     /// contain arbitrary bytes.
+    ///
+    /// 注：不进行二进制检测
     None,
     /// The given byte is searched in all contents read by the line buffer. If
     /// it occurs, then the data is considered binary and the line buffer acts
     /// as if it reached EOF. The line buffer guarantees that this byte will
     /// never be observable by callers.
+    ///
+    /// 注：当发现该字节时，则认为是二进制数据，停止读取，返回错误
     Quit(u8),
     /// The given byte is searched in all contents read by the line buffer. If
     /// it occurs, then it is replaced by the line terminator. The line buffer
     /// guarantees that this byte will never be observable by callers.
+    ///
+    /// 注：当发现该字节时，替换为行终止符。行缓冲区保证调用者永远不会看到这个字节。
     Convert(u8),
 }
 
@@ -82,15 +96,25 @@ impl BinaryDetection {
 
 /// The configuration of a buffer. This contains options that are fixed once
 /// a buffer has been constructed.
+///
+/// 注：buffer的配置
 #[derive(Clone, Copy, Debug)]
 struct Config {
     /// The number of bytes to attempt to read at a time.
+    ///
+    /// 注：每次读取的字节数
     capacity: usize,
     /// The line terminator.
+    ///
+    /// 注：行终止符
     lineterm: u8,
     /// The behavior for handling long lines.
+    ///
+    /// 注：长行内存分配处理
     buffer_alloc: BufferAllocation,
     /// When set, the presence of the given byte indicates binary content.
+    ///
+    /// 注：二进制检测策略
     binary: BinaryDetection,
 }
 
@@ -204,6 +228,8 @@ impl LineBufferBuilder {
 
 /// A line buffer reader efficiently reads a line oriented buffer from an
 /// arbitrary reader.
+///
+/// 注：包装reader和buffer；提供buffer的核心api：fill、buffer、consume，更像一个line_buffer代理
 #[derive(Debug)]
 pub(crate) struct LineBufferReader<'b, R> {
     rdr: R,
@@ -290,23 +316,35 @@ impl<'b, R: io::Read> LineBufferReader<'b, R> {
 /// Callers should create line buffers sparingly and reuse them when possible.
 /// Line buffers cannot be used directly, but instead must be used via the
 /// LineBufferReader.
+///
+/// 注：管理一个（通常固定）缓冲区，用于存储（多）行；通过fill从外边reader读取数据并解析行，通过consume来消费
 #[derive(Clone, Debug)]
 pub(crate) struct LineBuffer {
     /// The configuration of this buffer.
+    ///
+    /// 注：buffer配置
     config: Config,
     /// The primary buffer with which to hold data.
+    ///
+    /// 注：buf大小为config.capacity
     buf: Vec<u8>,
     /// The current position of this buffer. This is always a valid sliceable
     /// index into `buf`, and its maximum value is the length of `buf`.
+    ///
+    /// 注：当前缓冲区的位置
     pos: usize,
     /// The end position of searchable content in this buffer. This is either
     /// set to just after the final line terminator in the buffer, or to just
     /// after the end of the last byte emitted by the reader when the reader
     /// has been exhausted.
+    ///
+    /// 注：缓冲区会后一个line_term的位置
     last_lineterm: usize,
     /// The end position of the buffer. This is always greater than or equal to
     /// last_lineterm. The bytes between last_lineterm and end, if any, always
     /// correspond to a partial line.
+    ///
+    /// 注：缓冲区的结束位置（因为缓冲区是复用的，所以需要指定一个end，即可读最大位置）
     end: usize,
     /// The absolute byte offset corresponding to `pos`. This is most typically
     /// not a valid index into addressable memory, but rather, an offset that
@@ -316,9 +354,13 @@ pub(crate) struct LineBuffer {
     /// When the line buffer reaches EOF, this is set to the position just
     /// after the last byte read from the underlying reader. That is, it
     /// becomes the total count of bytes that have been read.
+    ///
+    /// 注：全局的绝对位置
     absolute_byte_offset: u64,
     /// If binary data was found, this records the absolute byte offset at
     /// which it was first detected.
+    ///
+    /// 注：如果发现了二进制数据，则记录其首次检测到的绝对字节偏移量
     binary_byte_offset: Option<u64>,
 }
 
@@ -370,6 +412,8 @@ impl LineBuffer {
 
     /// Consume the number of bytes provided. This must be less than or equal
     /// to the number of bytes returned by `buffer`.
+    ///
+    /// 注：标记已读进度
     fn consume(&mut self, amt: usize) {
         assert!(amt <= self.buffer().len());
         self.pos += amt;
@@ -403,6 +447,8 @@ impl LineBuffer {
     /// This forwards any errors returned by `rdr`, and will also return an
     /// error if the buffer must be expanded past its allocation limit, as
     /// governed by the buffer allocation strategy.
+    ///
+    /// 注：填充buf，直到能读到line_term（因为reader是块读取，所以一次fill可能会读取到多行）
     fn fill<R: io::Read>(&mut self, mut rdr: R) -> Result<bool, io::Error> {
         // If the binary detection heuristic tells us to quit once binary data
         // has been observed, then we no longer read new data and reach EOF
@@ -411,16 +457,19 @@ impl LineBuffer {
             return Ok(!self.buffer().is_empty());
         }
 
+        // 注：buf重置
         self.roll();
         assert_eq!(self.pos, 0);
         loop {
+            // 注：确认容量是否充足
             self.ensure_capacity()?;
+            // 注：根据剩余buf大小，让reader进行填充
             let readlen = rdr.read(self.free_buffer().as_bytes_mut())?;
             if readlen == 0 {
                 // We're only done reading for good once the caller has
                 // consumed everything.
                 self.last_lineterm = self.end;
-                return Ok(!self.buffer().is_empty());
+                return Ok(!self.buffer().is_empty()); // 注：如果不为空，返回true，表明还有空间可读
             }
 
             // Get a mutable view into the bytes we've just read. These are
@@ -429,12 +478,14 @@ impl LineBuffer {
             // in the case of binary conversion.
             let oldend = self.end;
             self.end += readlen;
-            let newbytes = &mut self.buf[oldend..self.end];
+            let newbytes = &mut self.buf[oldend..self.end]; // 注：新读取的buf
 
             // Binary detection.
+            // 注：对新读取的buf进行二进制检测
             match self.config.binary {
                 BinaryDetection::None => {} // nothing to do
                 BinaryDetection::Quit(byte) => {
+                    // 注：检测新读取的buf中，是否有停止符，有则直接返回
                     if let Some(i) = newbytes.find_byte(byte) {
                         self.end = oldend + i;
                         self.last_lineterm = self.end;
@@ -447,6 +498,7 @@ impl LineBuffer {
                     }
                 }
                 BinaryDetection::Convert(byte) => {
+                    // 注：检测新读取的buf中，是否有终止符，有则替换成line_term
                     if let Some(i) =
                         replace_bytes(newbytes, byte, self.config.lineterm)
                     {
@@ -462,6 +514,7 @@ impl LineBuffer {
             }
 
             // Update our `last_lineterm` positions if we read one.
+            // 注：尝试从右往前查找line_term，有则表明读取到至少一个完整行
             if let Some(i) = newbytes.rfind_byte(self.config.lineterm) {
                 self.last_lineterm = oldend + i + 1;
                 return Ok(true);
@@ -477,6 +530,8 @@ impl LineBuffer {
     ///
     /// After rolling, `last_lineterm` and `end` point to the same location,
     /// and `pos` is always set to `0`.
+    ///
+    /// 注：清理已读的内容，将剩余buf挪到开头，pos、end、last_lineterm也跟着重置
     fn roll(&mut self) {
         if self.pos == self.end {
             self.pos = 0;
@@ -496,6 +551,8 @@ impl LineBuffer {
     /// in which to read more data. If there is no free space, then more is
     /// allocated. If the allocation must exceed the configured limit, then
     /// this returns an error.
+    ///
+    /// 注：确认容量，没有空间则根据分配策略进行扩容（double扩容）
     fn ensure_capacity(&mut self) -> Result<(), io::Error> {
         if !self.free_buffer().is_empty() {
             return Ok(());

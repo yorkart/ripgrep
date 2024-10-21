@@ -287,6 +287,7 @@ impl Default for LineTerminator {
 #[derive(Clone, Debug)]
 pub struct ByteSet(BitSet);
 
+/// 注：类似bitmap索引，把256个字节压缩到64个u64中，每个u64可以表示64个字节
 #[derive(Clone, Copy)]
 struct BitSet([u64; 4]);
 
@@ -376,9 +377,13 @@ impl ByteSet {
 /// capture value. Instead, it is the responsibility of a `Matcher` to build
 /// one, which might require knowledge of the matcher's internal implementation
 /// details.
+///
+/// 注：类似正则中的捕获组（capture group）
 pub trait Captures {
     /// Return the total number of capturing groups. This includes capturing
     /// groups that have not matched anything.
+    ///
+    /// 注：捕获组匹配的大小
     fn len(&self) -> usize;
 
     /// Return the capturing group match at the given index. If no match of
@@ -387,12 +392,16 @@ pub trait Captures {
     /// When a matcher reports a match with capturing groups, then the first
     /// capturing group (at index `0`) must always correspond to the offsets
     /// for the overall match.
+    ///
+    /// 注：按下标获取（正则中一般支持按下标和按key来获取捕获结果）
     fn get(&self, i: usize) -> Option<Match>;
 
     /// Return the overall match for the capture.
     ///
     /// This returns the match for index `0`. That is it is equivalent to
     /// `get(0).unwrap()`
+    ///
+    /// 注：如果确定匹配到了且有一个结果，该方法可以简化获取第一个匹配结果的调用
     #[inline]
     fn as_match(&self) -> Match {
         self.get(0).unwrap()
@@ -403,6 +412,8 @@ pub trait Captures {
     ///
     /// Note that capturing groups that have non-zero length but otherwise
     /// contain no matching groups are *not* empty.
+    ///
+    /// 注：true 没有获取到
     #[inline]
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -437,6 +448,11 @@ pub trait Captures {
     /// the given `haystack`. Generally, this means that `haystack` should be
     /// the same slice that was searched to get the current capture group
     /// matches.
+    ///
+    /// 注：匹配替换操作。
+    /// * `name_to_index` + `haystack`用于提取匹配文本
+    /// * `replacement` 是包含$name的模板
+    /// 从输入的原文haystack中，根据正则提取到信息，替换replacement中的$name部分。
     #[inline]
     fn interpolate<F>(
         &self,
@@ -521,12 +537,16 @@ pub enum LineMatchKind {
     ///
     /// This position can be anywhere in the line. It does not need to point
     /// at the location of the match.
+    ///
+    /// 注：表明当前行中确定存在匹配项
     Confirmed(usize),
     /// A position inside a line that may contain a match, and must be searched
     /// for verification.
     ///
     /// This position can be anywhere in the line. It does not need to point
     /// at the location of the match.
+    ///
+    /// 注：表明当前行可能存在匹配项，但是需要进一步验证
     Candidate(usize),
 }
 
@@ -568,6 +588,8 @@ pub trait Matcher {
     /// The significance of the starting point is that it takes the surrounding
     /// context into consideration. For example, the `\A` anchor can only
     /// match when `at == 0`.
+    ///
+    /// 注：从指定位置开始，查找第一个匹配项， 类似正则里的find()
     fn find_at(
         &self,
         haystack: &[u8],
@@ -688,6 +710,8 @@ pub trait Matcher {
     /// The significance of the starting point is that it takes the surrounding
     /// context into consideration. For example, the `\A` anchor can only
     /// match when `at == 0`.
+    ///
+    /// 注：从at位置不断检索haystack进行匹配，通过matched来回调匹配的结果
     #[inline]
     fn try_find_iter_at<F, E>(
         &self,
@@ -883,6 +907,8 @@ pub trait Matcher {
     /// Note that if implementors seek to support capturing groups, then they
     /// should implement this method. Other methods that match based on
     /// captures will then work automatically.
+    ///
+    /// 注：从at位置不断检索haystack进行匹配，通过captures来存储匹配的结果。类似正则search_captures()函数
     #[inline]
     fn captures_at(
         &self,

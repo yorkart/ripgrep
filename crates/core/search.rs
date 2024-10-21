@@ -255,12 +255,15 @@ impl<W: WriteColor> SearchWorker<W> {
 
         self.searcher.set_binary_detection(bin);
         if haystack.is_stdin() {
+            // 注：stdin作为输入流
             self.search_reader(path, &mut io::stdin().lock())
         } else if self.should_preprocess(path) {
             self.search_preprocessor(path)
         } else if self.should_decompress(path) {
+            // 注：需要解压文件
             self.search_decompress(path)
         } else {
+            // 注：默认的搜索
             self.search_path(path)
         }
     }

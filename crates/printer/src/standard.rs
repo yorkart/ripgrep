@@ -39,6 +39,7 @@ struct Config {
     hyperlink: HyperlinkConfig,
     stats: bool,
     heading: bool,
+    /// 注：--with-filename参数开启路径输出
     path: bool,
     only_matching: bool,
     per_match: bool,
@@ -493,6 +494,7 @@ impl StandardBuilder {
 pub struct Standard<W> {
     config: Config,
     wtr: RefCell<CounterWriter<W>>,
+    /// 注：每次匹配的信息，用于统计匹配的次数
     matches: Vec<Match>,
 }
 
@@ -561,6 +563,7 @@ impl<W: WriteColor> Standard<W> {
         M: Matcher,
         P: ?Sized + AsRef<Path>,
     {
+        // 注：如果没有配置输出文件路径，直接sink
         if !self.config.path {
             return self.sink(matcher);
         }
@@ -652,10 +655,15 @@ impl<W> Standard<W> {
 /// output to.
 #[derive(Debug)]
 pub struct StandardSink<'p, 's, M: Matcher, W> {
+    /// 注：匹配器
     matcher: M,
+    /// 注：标准printer
     standard: &'s mut Standard<W>,
+    /// 注：没有配置输出替换，用不到
     replacer: Replacer<M>,
+    /// 注：基于模板替换器，不采用模板替换用不到
     interpolator: hyperlink::Interpolator,
+    /// 注：是否打印路径，默认为None，开启path输出才会用到
     path: Option<PrinterPath<'p>>,
     start_time: Instant,
     match_count: u64,
@@ -711,6 +719,9 @@ impl<'p, 's, M: Matcher, W: WriteColor> StandardSink<'p, 's, M, W> {
 
     /// Execute the matcher over the given bytes and record the match
     /// locations if the current configuration demands match granularity.
+    ///
+    /// 注：这里的bytes[range]表示的是匹配到的这一行数据，而不是匹配的关键词。
+    /// 函数结束后， self.standard.matches会被赋值
     fn record_matches(
         &mut self,
         searcher: &Searcher,
@@ -721,6 +732,8 @@ impl<'p, 's, M: Matcher, W: WriteColor> StandardSink<'p, 's, M, W> {
         if !self.needs_match_granularity {
             return Ok(());
         }
+
+        println!("record_matches: {}", std::str::from_utf8(&bytes[range.clone()]).unwrap());
         // If printing requires knowing the location of each individual match,
         // then compute and stored those right now for use later. While this
         // adds an extra copy for storing the matches, we do amortize the
@@ -728,6 +741,7 @@ impl<'p, 's, M: Matcher, W: WriteColor> StandardSink<'p, 's, M, W> {
         // the extent that it's easy to ensure that we never do more than
         // one search to find the matches (well, for replacements, we do one
         // additional search to perform the actual replacement).
+        // 注：查找这一行里的匹配的关键词（这里是二次匹配，第二次因为已经过滤后数据，量很小，二次match还能接受）
         let matches = &mut self.standard.matches;
         find_iter_at_in_context(
             searcher,
@@ -827,11 +841,13 @@ impl<'p, 's, M: Matcher, W: WriteColor> Sink for StandardSink<'p, 's, M, W> {
             self.after_context_remaining = searcher.after_context() as u64;
         }
 
+        // 注：对命中到的行，提取出匹配的关键词，然后记录到self.standard.matches里
         self.record_matches(
             searcher,
             mat.buffer(),
             mat.bytes_range_in_buffer(),
         )?;
+        // 注：如果配置了目标，则进行模板替换（暂时用不到）
         self.replace(searcher, mat.buffer(), mat.bytes_range_in_buffer())?;
 
         if let Some(ref mut stats) = self.stats {
@@ -1419,6 +1435,8 @@ impl<'a, M: Matcher, W: WriteColor> StandardImpl<'a, M, W> {
     /// write that path to the underlying writer followed by a line terminator.
     /// (If a path terminator is set, then that is used instead of the line
     /// terminator.)
+    ///
+    /// 注：如果配置有路径，那么就输出路径，否则输出行终止符。
     fn write_path_line(&self) -> io::Result<()> {
         if let Some(path) = self.path() {
             self.write_path_hyperlink(path)?;
@@ -1431,12 +1449,15 @@ impl<'a, M: Matcher, W: WriteColor> StandardImpl<'a, M, W> {
         Ok(())
     }
 
+    /// 注：输出搜索的前置信息
     fn write_search_prelude(&self) -> io::Result<()> {
         let this_search_written = self.wtr().borrow().count() > 0;
         if this_search_written {
             return Ok(());
         }
         if let Some(ref sep) = *self.config().separator_search {
+            // 注：输出分隔符（如果配置，默认是空，sep.len() == 0）
+            println!("write_search_prelude: {}, {:?}", std::str::from_utf8(sep.as_slice()).unwrap(), sep.as_slice());
             let ever_written = self.wtr().borrow().total_count() > 0;
             if ever_written {
                 self.write(sep)?;
