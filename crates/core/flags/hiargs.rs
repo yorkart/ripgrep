@@ -32,6 +32,8 @@ use crate::{
 ///
 /// So while low level arguments are collected during parsing itself, high
 /// level arguments aren't created until parsing has completely finished.
+///
+/// 注：将LowArgs中值类型转换为结构，方便后续操作
 #[derive(Debug)]
 pub(crate) struct HiArgs {
     binary: BinaryDetection,

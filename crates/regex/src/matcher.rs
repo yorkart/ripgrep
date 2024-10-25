@@ -55,6 +55,7 @@ impl RegexMatcherBuilder {
         patterns: &[P],
     ) -> Result<RegexMatcher, Error> {
         println!("pattern: {:?}", patterns.iter().map(AsRef::as_ref).collect::<Vec<_>>());
+        // TODO：验证是否可以实现多个关键词and关系实现？
         let mut chir = self.config.build_many(patterns)?;
         // 'whole_line' is a strict subset of 'word', so when it is enabled,
         // we don't need to both with any specific to word matching.
@@ -67,6 +68,7 @@ impl RegexMatcherBuilder {
         log::trace!("final regex: {:?}", chir.hir().to_string());
 
         // 注：确定排除的字符，构建成bitmap
+        println!("pattern hir: {:?}", chir.hir());
         let non_matching_bytes = chir.non_matching_bytes();
         // If we can pick out some literals from the regex, then we might be
         // able to build a faster regex that quickly identifies candidate

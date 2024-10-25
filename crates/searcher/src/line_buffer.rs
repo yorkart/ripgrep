@@ -73,7 +73,7 @@ pub(crate) enum BinaryDetection {
     /// it occurs, then it is replaced by the line terminator. The line buffer
     /// guarantees that this byte will never be observable by callers.
     ///
-    /// 注：当发现该字节时，替换为行终止符。行缓冲区保证调用者永远不会看到这个字节。
+    /// 注：当发现该字节时，进行字符替换。行缓冲区保证调用者永远不会看到这个字节。
     Convert(u8),
 }
 
@@ -106,7 +106,7 @@ struct Config {
     capacity: usize,
     /// The line terminator.
     ///
-    /// 注：行终止符
+    /// 注：换行符
     lineterm: u8,
     /// The behavior for handling long lines.
     ///

@@ -386,6 +386,7 @@ fn search_path<M: Matcher, W: WriteColor>(
 ) -> io::Result<SearchResult> {
     match *printer {
         Printer::Standard(ref mut p) => {
+            // 注：path不是指输出到文件，是指输出结果中是否带path信息
             let mut sink = p.sink_with_path(&matcher, path);
             searcher.search_path(&matcher, path, &mut sink)?;
             Ok(SearchResult {

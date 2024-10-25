@@ -29,6 +29,8 @@ use {
 ///
 /// Low level arguments are populated by the parser directly via the `update`
 /// method on the corresponding implementation of the `Flag` trait.
+///
+/// 注：命令行参数结构映射
 #[derive(Debug, Default)]
 pub(crate) struct LowArgs {
     // Essential arguments.

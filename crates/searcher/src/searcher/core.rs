@@ -44,7 +44,7 @@ pub(crate) struct Core<'s, M: 's, S> {
     /// 等同于 记录已经完成sink发送进度，即还没有sink部分的offset
     /// 作用于每次roll内的状态，下一次roll被重置
     last_line_visited: usize,
-    /// 注：标记向后探测多少行。这个标记逻辑很刁钻：
+    /// 注：标记向后探测多少行。这个标记逻辑很隐晦：
     /// 1. 在匹配后才复制，后面持续的遍历，如果匹配不成功，但该字段有值，则说明是需要级联输出，并递减该值
     /// 2. 如果在after_context范围内，又成功匹配，重置该值。
     after_context_left: usize,

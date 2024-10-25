@@ -168,6 +168,7 @@ pub(crate) fn locate(bytes: &[u8], line_term: u8, range: Match) -> Match {
 /// considered part of the last line.
 ///
 /// 注：从后向前，找count个line_term，即找多少行； 返回找到的offset
+/// 用于before_context场景，向前查找第N个换行符
 pub(crate) fn preceding(bytes: &[u8], line_term: u8, count: usize) -> usize {
     preceding_by_pos(bytes, bytes.len(), line_term, count)
 }

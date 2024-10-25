@@ -563,6 +563,8 @@ pub enum LineMatchKind {
 /// top of `find_at` and `new_captures`. It is not uncommon for implementations
 /// to be able to provide faster variants of some methods; in those cases,
 /// simply override the default implementation.
+///
+/// 注：实现输入数据，实现迭代查找字符
 pub trait Matcher {
     /// The concrete type of capturing groups used for this matcher.
     ///
