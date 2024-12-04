@@ -51,8 +51,7 @@ where
     }
 
     fn consumed_remain(&mut self) {
-        let buf = &self.rdr.buffer()[0..self.core.pos()];
-        let consumed = self.core.roll(buf);
+        let consumed = self.core.pos();
         self.rdr.consume(consumed);
     }
 
